@@ -55,3 +55,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-179 -->
 - #179: Add expiring, revocable party invitation tokens
+
+<!-- handsoff-issue-182 -->
+- #182: Support deterministic party leadership transfer
