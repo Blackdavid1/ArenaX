@@ -58,3 +58,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-216 -->
 - #216: Add verified withdrawal destination changes with a cooling period
+
+<!-- handsoff-issue-217 -->
+- #217: Route high-risk withdrawals through a dual-control review queue
