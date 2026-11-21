@@ -61,3 +61,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-221 -->
 - #221: Issue expiring fee quotes before payment confirmation
+
+<!-- handsoff-issue-222 -->
+- #222: Add operator-controlled pause and resume for settlement sagas
