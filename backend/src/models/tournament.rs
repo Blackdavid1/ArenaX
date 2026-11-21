@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -30,6 +31,10 @@ pub struct Tournament {
     pub min_skill_level: Option<i32>, // For skill-based matchmaking
     pub max_skill_level: Option<i32>,
     pub cleaned_up_at: Option<DateTime<Utc>>,
+    /// IANA timezone identifier used for organizer-facing display.
+    pub timezone: String,
+    /// UTC offset (seconds) captured at scheduling time for display.
+    pub display_utc_offset_seconds: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +114,33 @@ impl std::fmt::Display for TournamentVisibility {
     }
 }
 
+/// Explicit, user-visible rule for resolving local times that are ambiguous
+/// (fall-back) or nonexistent (spring-forward) during DST transitions.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DstResolutionRule {
+    /// Ambiguous local times resolve to the earlier instant; nonexistent local
+    /// times shift forward by the DST gap.
+    Earlier,
+    /// Ambiguous local times resolve to the later instant; nonexistent local
+    /// times shift forward by the DST gap.
+    Later,
+}
+
+impl Default for DstResolutionRule {
+    fn default() -> Self {
+        DstResolutionRule::Earlier
+    }
+}
+
+impl std::fmt::Display for DstResolutionRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DstResolutionRule::Earlier => write!(f, "earlier"),
+            DstResolutionRule::Later => write!(f, "later"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateTournamentRequest {
     #[validate(length(min = 3, max = 255))]
@@ -127,6 +159,20 @@ pub struct CreateTournamentRequest {
     pub rules: Option<String>,
     pub min_skill_level: Option<i32>,
     pub max_skill_level: Option<i32>,
+    /// Required IANA timezone identifier (e.g. `America/New_York`).
+    pub timezone: String,
+    /// Rule applied when the local time is ambiguous or nonexistent.
+    #[serde(default)]
+    pub dst_resolution: DstResolutionRule,
+}
+
+impl CreateTournamentRequest {
+    /// Validate the IANA timezone identifier, returning the parsed `Tz`.
+    pub fn parse_timezone(&self) -> Result<Tz, String> {
+        self.timezone
+            .parse::<Tz>()
+            .map_err(|_| format!("invalid IANA timezone: {}", self.timezone))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
@@ -168,6 +214,10 @@ pub struct TournamentResponse {
     pub can_join: bool,
     pub is_participant: bool,
     pub participant_status: Option<ParticipantStatus>,
+    /// IANA timezone used for organizer-facing display.
+    pub timezone: String,
+    /// UTC offset (seconds) captured at scheduling time for display.
+    pub display_utc_offset_seconds: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -243,203 +293,6 @@ pub struct TournamentStanding {
 pub struct PrizePool {
     pub id: Uuid,
     pub tournament_id: Uuid,
-    pub total_amount: i64,
-    pub currency: String,
-    pub stellar_account: String,
-    pub stellar_asset_code: Option<String>,
-    pub distribution_percentages: String, // JSON array of percentages for each rank
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
+    pub total_amoun
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JoinTournamentRequest {
-    pub payment_method: String,            // "fiat" or "arenax_token"
-    pub payment_reference: Option<String>, // For fiat payments
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TournamentListResponse {
-    pub tournaments: Vec<TournamentResponse>,
-    pub total: i64,
-    pub page: i32,
-    pub per_page: i32,
-}
-
-// ===== Additional Types for Complete Tournament Management =====
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[repr(i32)]
-pub enum BracketType {
-    SingleElimination = 0,
-    DoubleElimination = 1,
-    RoundRobin = 2,
-    Swiss = 3,
-}
-
-impl std::fmt::Display for BracketType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BracketType::SingleElimination => write!(f, "single_elimination"),
-            BracketType::DoubleElimination => write!(f, "double_elimination"),
-            BracketType::RoundRobin => write!(f, "round_robin"),
-            BracketType::Swiss => write!(f, "swiss"),
-        }
-    }
-}
-
-impl From<i32> for BracketType {
-    fn from(v: i32) -> Self {
-        match v {
-            0 => BracketType::SingleElimination,
-            1 => BracketType::DoubleElimination,
-            2 => BracketType::RoundRobin,
-            3 => BracketType::Swiss,
-            _ => BracketType::SingleElimination,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-pub enum RoundType {
-    Qualification,
-    Elimination,
-    Semifinal,
-    Final,
-}
-
-impl std::fmt::Display for RoundType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RoundType::Qualification => write!(f, "qualification"),
-            RoundType::Elimination => write!(f, "elimination"),
-            RoundType::Semifinal => write!(f, "semifinal"),
-            RoundType::Final => write!(f, "final"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-pub enum RoundStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Cancelled,
-}
-
-impl std::fmt::Display for RoundStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RoundStatus::Pending => write!(f, "pending"),
-            RoundStatus::InProgress => write!(f, "in_progress"),
-            RoundStatus::Completed => write!(f, "completed"),
-            RoundStatus::Cancelled => write!(f, "cancelled"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-pub enum MatchStatus {
-    Pending,
-    Scheduled,
-    InProgress,
-    Completed,
-    Disputed,
-    Cancelled,
-    Abandoned,
-}
-
-impl std::fmt::Display for MatchStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MatchStatus::Pending => write!(f, "pending"),
-            MatchStatus::Scheduled => write!(f, "scheduled"),
-            MatchStatus::InProgress => write!(f, "in_progress"),
-            MatchStatus::Completed => write!(f, "completed"),
-            MatchStatus::Disputed => write!(f, "disputed"),
-            MatchStatus::Cancelled => write!(f, "cancelled"),
-            MatchStatus::Abandoned => write!(f, "abandoned"),
-        }
-    }
-}
-
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TournamentRound {
-    pub id: Uuid,
-    pub tournament_id: Uuid,
-    pub round_number: i32,
-    pub round_type: String,
-    pub status: String,
-    pub scheduled_start: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TournamentMatch {
-    pub id: Uuid,
-    pub tournament_id: Uuid,
-    pub round_id: Uuid,
-    pub match_number: i32,
-    pub player1_id: Uuid,
-    pub player2_id: Option<Uuid>,
-    pub winner_id: Option<Uuid>,
-    pub player1_score: Option<i32>,
-    pub player2_score: Option<i32>,
-    pub status: String,
-    pub scheduled_time: Option<DateTime<Utc>>,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-// ===== Type Conversions =====
-
-impl std::str::FromStr for RoundType {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "qualification" => Ok(RoundType::Qualification),
-            "elimination" => Ok(RoundType::Elimination),
-            "semifinal" => Ok(RoundType::Semifinal),
-            "final" => Ok(RoundType::Final),
-            _ => Ok(RoundType::Elimination),
-        }
-    }
-}
-
-impl std::str::FromStr for RoundStatus {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pending" => Ok(RoundStatus::Pending),
-            "in_progress" => Ok(RoundStatus::InProgress),
-            "completed" => Ok(RoundStatus::Completed),
-            "cancelled" => Ok(RoundStatus::Cancelled),
-            _ => Ok(RoundStatus::Pending),
-        }
-    }
-}
-
-impl std::str::FromStr for MatchStatus {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pending" => Ok(MatchStatus::Pending),
-            "scheduled" => Ok(MatchStatus::Scheduled),
-            "in_progress" => Ok(MatchStatus::InProgress),
-            "completed" => Ok(MatchStatus::Completed),
-            "disputed" => Ok(MatchStatus::Disputed),
-            "cancelled" => Ok(MatchStatus::Cancelled),
-            "abandoned" => Ok(MatchStatus::Abandoned),
-            _ => Ok(MatchStatus::Pending),
-        }
-    }
-}
+/* … truncated 6211 chars — edit only what you need near the top … */
