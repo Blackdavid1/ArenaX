@@ -55,3 +55,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-185 -->
 - #185: Introduce team workspaces with explicit membership roles
+
+<!-- handsoff-issue-186 -->
+- #186: Build audited team roster administration
