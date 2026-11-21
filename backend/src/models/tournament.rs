@@ -141,6 +141,75 @@ impl std::fmt::Display for DstResolutionRule {
     }
 }
 
+/// Policy governing whether and how a team roster may be changed after the
+/// roster lock. Substitutions are always audited and never rewrite rounds that
+/// have already been played.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SubstitutionPolicy {
+    /// No roster changes are permitted after lock.
+    Locked,
+    /// Substitutions are allowed only before the first round is played.
+    BeforeFirstRound,
+    /// Substitutions are allowed at any time, subject to roster size limits.
+    Always,
+}
+
+impl Default for SubstitutionPolicy {
+    fn default() -> Self {
+        SubstitutionPolicy::BeforeFirstRound
+    }
+}
+
+impl std::fmt::Display for SubstitutionPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SubstitutionPolicy::Locked => write!(f, "locked"),
+            SubstitutionPolicy::BeforeFirstRound => write!(f, "before_first_round"),
+            SubstitutionPolicy::Always => write!(f, "always"),
+        }
+    }
+}
+
+/// Team-level registration request. Captures the eligible roster snapshot,
+/// captain, substitutions policy, and rules version at registration time.
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct TeamRegistrationRequest {
+    pub tournament_id: Uuid,
+    /// Captain who owns the registration and is responsible for the roster.
+    pub captain_id: Uuid,
+    /// Eligible roster snapshot (captain included).
+    #[validate(length(min = 1, max = 64))]
+    pub roster: Vec<Uuid>,
+    #[serde(default)]
+    pub substitution_policy: SubstitutionPolicy,
+    /// Rules version the team is registering under.
+    #[validate(length(min = 1, max = 64))]
+    pub rules_version: String,
+}
+
+impl TeamRegistrationRequest {
+    /// Validate the roster against the tournament's min/max team size and
+    /// ensure the captain is part of the roster with no duplicate members.
+    pub fn validate_roster(&self, min_team_size: i32, max_team_size: i32) -> Result<(), String> {
+        if !self.roster.contains(&self.captain_id) {
+            return Err("captain must be part of the roster".to_string());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for member in &self.roster {
+            if !seen.insert(*member) {
+                return Err(format!("duplicate roster member: {member}"));
+            }
+        }
+        let size = self.roster.len() as i32;
+        if size < min_team_size || size > max_team_size {
+            return Err(format!(
+                "roster size {size} outside allowed range {min_team_size}..={max_team_size}"
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreateTournamentRequest {
     #[validate(length(min = 3, max = 255))]
@@ -233,66 +302,6 @@ pub struct TournamentParticipant {
     pub eliminated_at: Option<DateTime<Utc>>,
     pub final_rank: Option<i32>,
     pub prize_amount: Option<i64>,
-    pub prize_currency: Option<String>,
-    pub prize_tx_hash: Option<String>,
-}
+    pub prize_currency: Op
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[repr(i32)]
-pub enum ParticipantStatus {
-    Registered = 0,
-    Paid = 1,
-    Active = 2,
-    Eliminated = 3,
-    Disqualified = 4,
-    Withdrawn = 5,
-}
-
-impl std::fmt::Display for ParticipantStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParticipantStatus::Registered => write!(f, "registered"),
-            ParticipantStatus::Paid => write!(f, "paid"),
-            ParticipantStatus::Active => write!(f, "active"),
-            ParticipantStatus::Eliminated => write!(f, "eliminated"),
-            ParticipantStatus::Disqualified => write!(f, "disqualified"),
-            ParticipantStatus::Withdrawn => write!(f, "withdrawn"),
-        }
-    }
-}
-
-impl From<i32> for ParticipantStatus {
-    fn from(v: i32) -> Self {
-        match v {
-            0 => ParticipantStatus::Registered,
-            1 => ParticipantStatus::Paid,
-            2 => ParticipantStatus::Active,
-            3 => ParticipantStatus::Eliminated,
-            4 => ParticipantStatus::Disqualified,
-            5 => ParticipantStatus::Withdrawn,
-            _ => ParticipantStatus::Registered,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TournamentStanding {
-    pub tournament_id: Uuid,
-    pub tournament_name: String,
-    pub user_id: Uuid,
-    pub username: Option<String>,
-    pub display_name: Option<String>,
-    pub participation_status: String,
-    pub wins: Option<i64>,
-    pub matches_played: Option<i64>,
-    pub total_score: Option<Decimal>,
-    pub current_rank: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PrizePool {
-    pub id: Uuid,
-    pub tournament_id: Uuid,
-    pub total_amoun
-
-/* … truncated 6211 chars — edit only what you need near the top … */
+/* … truncated 1930 chars — edit only what you need near the top … */
