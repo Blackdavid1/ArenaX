@@ -52,3 +52,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-22 -->
 - #22: Reconcile provider balances and unresolved payments
+
+<!-- handsoff-issue-211 -->
+- #211: Publish a participant-safe post-event results and finance report
