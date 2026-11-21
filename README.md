@@ -55,3 +55,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-215 -->
 - #215: Represent chargebacks and reversals as immutable ledger adjustments
+
+<!-- handsoff-issue-216 -->
+- #216: Add verified withdrawal destination changes with a cooling period
