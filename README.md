@@ -58,3 +58,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-220 -->
 - #220: Provide privacy-aware wallet statement exports
+
+<!-- handsoff-issue-221 -->
+- #221: Issue expiring fee quotes before payment confirmation
