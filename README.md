@@ -61,3 +61,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-217 -->
 - #217: Route high-risk withdrawals through a dual-control review queue
+
+<!-- handsoff-issue-218 -->
+- #218: Create an aged payment-reconciliation exception queue
