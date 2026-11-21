@@ -52,3 +52,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-22 -->
 - #22: Reconcile provider balances and unresolved payments
+
+<!-- handsoff-issue-232 -->
+- #232: Reconcile off-chain settlement records with finalized contract events
