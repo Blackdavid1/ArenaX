@@ -46,3 +46,8 @@ An alias may only be removed once it has been deprecated for at least the publis
 ## Contributing
 
 Keep changes surgical and inside the scope of the assigned issue. Do not install dependencies, run builds, or reformat unrelated code as part of a fix.
+
+## Handsoff notes
+
+<!-- handsoff-issue-166 -->
+- #166: Add cursor pagination for high-volume API collections
