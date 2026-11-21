@@ -158,6 +158,162 @@ impl TournamentRulesSnapshot {
     }
 }
 
+/// Read-only dry-run preview of a proposed tournament configuration.
+///
+/// Produced by [`TournamentConfigPreview::preview`], which reuses the same
+/// validation rules and bracket/fee calculation as the server-side create
+/// path. A preview performs no reservation, payment, notification, or
+/// persistent mutation — it only reports what the create path would do.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TournamentConfigPreview {
+    /// True when the proposed configuration would pass create-path validation.
+    pub valid: bool,
+    /// Human-readable validation errors (empty when `valid`).
+    pub errors: Vec<String>,
+    /// Bracket shape the create path would generate (None when invalid).
+    pub bracket: Option<BracketPreview>,
+    /// Fee/payout calculation the create path would apply (None when invalid).
+    pub fees: Option<FeePreview>,
+    /// Rules snapshot the create path would capture for this configuration.
+    pub rules_snapshot: Option<TournamentRulesSnapshot>,
+}
+
+/// Bracket shape implied by a configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BracketPreview {
+    pub bracket_type: String,
+    /// Number of participant slots the bracket is sized for.
+    pub capacity: i32,
+    /// Number of rounds in the bracket.
+    pub rounds: u32,
+    /// Number of byes required to fill the bracket to a power of two.
+    pub byes: u32,
+}
+
+/// Fee and payout implications of a configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeePreview {
+    pub entry_fee: i64,
+    pub entry_fee_currency: String,
+    /// Total entry fees collected at full capacity.
+    pub gross_entry_fees: i64,
+    pub prize_pool: i64,
+    pub prize_pool_currency: String,
+}
+
+impl TournamentConfigPreview {
+    /// Compute a dry-run preview for a proposed configuration.
+    ///
+    /// This is the canonical preview entry point: it applies the same
+    /// validation rules and bracket/fee calculation as the server-side create
+    /// path, and performs no reservation, payment, notification, or persistent
+    /// mutation.
+    pub fn preview(tournament: &Tournament) -> Self {
+        let errors = Self::validate_config(tournament);
+        if !errors.is_empty() {
+            return Self {
+                valid: false,
+                errors,
+                bracket: None,
+                fees: None,
+                rules_snapshot: None,
+            };
+        }
+
+        Self {
+            valid: true,
+            errors: Vec::new(),
+            bracket: Some(Self::compute_bracket(tournament)),
+            fees: Some(Self::compute_fees(tournament)),
+            rules_snapshot: Some(TournamentRulesSnapshot::capture(tournament)),
+        }
+    }
+
+    /// Validation rules shared with the server-side create path.
+    fn validate_config(tournament: &Tournament) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        if tournament.name.trim().is_empty() {
+            errors.push("name must not be empty".to_string());
+        }
+        if tournament.game.trim().is_empty() {
+            errors.push("game must not be empty".to_string());
+        }
+        if tournament.max_participants < 2 {
+            errors.push("max_participants must be at least 2".to_string());
+        }
+        if tournament.entry_fee < 0 {
+            errors.push("entry_fee must not be negative".to_string());
+        }
+        if tournament.prize_pool < 0 {
+            errors.push("prize_pool must not be negative".to_string());
+        }
+        if tournament.entry_fee_currency.trim().is_empty() {
+            errors.push("entry_fee_currency must not be empty".to_string());
+        }
+        if tournament.prize_pool_currency.trim().is_empty() {
+            errors.push("prize_pool_currency must not be empty".to_string());
+        }
+        if tournament.registration_deadline >= tournament.start_time {
+            errors.push("registration_deadline must be before start_time".to_string());
+        }
+        if let Some(end_time) = tournament.end_time {
+            if end_time <= tournament.start_time {
+                errors.push("end_time must be after start_time".to_string());
+            }
+        }
+        if let (Some(min), Some(max)) =
+            (tournament.min_skill_level, tournament.max_skill_level)
+        {
+            if min > max {
+                errors.push("min_skill_level must not exceed max_skill_level".to_string());
+            }
+        }
+
+        errors
+    }
+
+    /// Bracket shape calculation shared with the server-side create path.
+    fn compute_bracket(tournament: &Tournament) -> BracketPreview {
+        let capacity = tournament.max_participants;
+        let (rounds, byes) = match tournament.bracket_type {
+            BracketType::SingleElimination | BracketType::DoubleElimination => {
+                let size = (capacity as u32).next_power_of_two();
+                let rounds = size.trailing_zeros();
+                let byes = size - capacity as u32;
+                (rounds, byes)
+            }
+            BracketType::RoundRobin => {
+                let rounds = if capacity > 1 { capacity as u32 - 1 } else { 0 };
+                (rounds, 0)
+            }
+            BracketType::Swiss => {
+                let rounds = (capacity as f64).log2().ceil() as u32;
+                (rounds, 0)
+            }
+        };
+
+        BracketPreview {
+            bracket_type: tournament.bracket_type.to_string(),
+            capacity,
+            rounds,
+            byes,
+        }
+    }
+
+    /// Fee/payout calculation shared with the server-side create path.
+    fn compute_fees(tournament: &Tournament) -> FeePreview {
+        let gross_entry_fees = tournament.entry_fee * tournament.max_participants as i64;
+        FeePreview {
+            entry_fee: tournament.entry_fee,
+            entry_fee_currency: tournament.entry_fee_currency.clone(),
+            gross_entry_fees,
+            prize_pool: tournament.prize_pool,
+            prize_pool_currency: tournament.prize_pool_currency.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TournamentType {
     SingleElimination,
@@ -228,147 +384,6 @@ pub enum TournamentVisibility {
 impl std::fmt::Display for TournamentVisibility {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TournamentVisibility::Public => write!(f, "public"),
-            TournamentVisibility::Private => write!(f, "private"),
-            TournamentVisibility::InviteOnly => write!(f, "invite_only"),
-        }
-    }
-}
+     
 
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct CreateTournamentRequest {
-    #[validate(length(min = 3, max = 255))]
-    pub name: String,
-    #[validate(length(max = 1000))]
-    pub description: Option<String>,
-    #[validate(length(min = 1, max = 50))]
-    pub game: String,
-    pub bracket_type: BracketType,
-    pub entry_fee: i64,
-    pub entry_fee_currency: String,
-    #[validate(range(min = 2, max = 1000))]
-    pub max_participants: i32,
-    pub start_time: DateTime<Utc>,
-    pub registration_deadline: DateTime<Utc>,
-    pub rules: Option<String>,
-    pub min_skill_level: Option<i32>,
-    pub max_skill_level: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct UpdateTournamentRequest {
-    #[validate(length(min = 3, max = 255))]
-    pub name: Option<String>,
-    #[validate(length(max = 1000))]
-    pub description: Option<String>,
-    pub tournament_type: Option<TournamentType>,
-    pub entry_fee: Option<Decimal>,
-    #[validate(range(min = 2, max = 1000))]
-    pub max_participants: Option<i32>,
-    pub visibility: Option<TournamentVisibility>,
-    pub registration_start: Option<DateTime<Utc>>,
-    pub registration_end: Option<DateTime<Utc>>,
-    pub start_time: Option<DateTime<Utc>>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub rules: Option<serde_json::Value>,
-    pub metadata: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TournamentResponse {
-    pub id: Uuid,
-    pub name: String,
-    pub description: Option<String>,
-    pub game: String,
-    pub max_participants: i32,
-    pub current_participants: i32,
-    pub entry_fee: i64,
-    pub entry_fee_currency: String,
-    pub prize_pool: i64,
-    pub prize_pool_currency: String,
-    pub status: TournamentStatus,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub registration_deadline: DateTime<Utc>,
-    pub bracket_type: BracketType,
-    pub can_join: bool,
-    pub is_participant: bool,
-    pub participant_status: Option<ParticipantStatus>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TournamentParticipant {
-    pub id: Uuid,
-    pub tournament_id: Uuid,
-    pub user_id: Uuid,
-    pub registered_at: DateTime<Utc>,
-    pub entry_fee_paid: bool,
-    pub status: ParticipantStatus,
-    pub seed_number: Option<i32>,
-    pub current_round: Option<i32>,
-    pub eliminated_at: Option<DateTime<Utc>>,
-    pub final_rank: Option<i32>,
-    pub prize_amount: Option<i64>,
-    pub prize_currency: Option<String>,
-    pub prize_tx_hash: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, sqlx::Type)]
-#[repr(i32)]
-pub enum ParticipantStatus {
-    Registered = 0,
-    Paid = 1,
-    Active = 2,
-    Eliminated = 3,
-    Disqualified = 4,
-    Withdrawn = 5,
-}
-
-impl std::fmt::Display for ParticipantStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParticipantStatus::Registered => write!(f, "registered"),
-            ParticipantStatus::Paid => write!(f, "paid"),
-            ParticipantStatus::Active => write!(f, "active"),
-            ParticipantStatus::Eliminated => write!(f, "eliminated"),
-            ParticipantStatus::Disqualified => write!(f, "disqualified"),
-            ParticipantStatus::Withdrawn => write!(f, "withdrawn"),
-        }
-    }
-}
-
-impl From<i32> for ParticipantStatus {
-    fn from(v: i32) -> Self {
-        match v {
-            0 => ParticipantStatus::Registered,
-            1 => ParticipantStatus::Paid,
-            2 => ParticipantStatus::Active,
-            3 => ParticipantStatus::Eliminated,
-            4 => ParticipantStatus::Disqualified,
-            5 => ParticipantStatus::Withdrawn,
-            _ => ParticipantStatus::Registered,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TournamentStanding {
-    pub tournament_id: Uuid,
-    pub tournament_name: String,
-    pub user_id: Uuid,
-    pub username: Option<String>,
-    pub display_name: Option<String>,
-    pub participation_status: String,
-    pub wins: Option<i64>,
-    pub matches_played: Option<i64>,
-    pub total_score: Option<Decimal>,
-    pub current_rank: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct PrizePool {
-    pub id: Uuid,
-    pub tournament_id: Uuid,
-    pub total_amoun
-
-/* … truncated 6211 chars — edit only what you need near the top … */
+/* … truncated 4689 chars — edit only what you need near the top … */
