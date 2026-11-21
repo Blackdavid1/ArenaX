@@ -55,3 +55,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-188 -->
 - #188: Add explainable smurf-risk signals without automatic punishment
+
+<!-- handsoff-issue-189 -->
+- #189: Define disconnect grace and no-contest match policy
