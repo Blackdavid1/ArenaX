@@ -55,3 +55,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-219 -->
 - #219: Continuously verify wallet balance projections against ledger entries
+
+<!-- handsoff-issue-220 -->
+- #220: Provide privacy-aware wallet statement exports
