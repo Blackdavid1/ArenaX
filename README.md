@@ -58,3 +58,6 @@ A drill passes only when measured RTO and RPO are within the objectives above an
 
 <!-- handsoff-issue-212 -->
 - #212: Define exact multi-currency ledger conversion and rounding rules
+
+<!-- handsoff-issue-213 -->
+- #213: Normalize provider payment states into one canonical lifecycle
