@@ -68,7 +68,7 @@ projection entries.
 
 ## Testing expectations
 
-All `eventType` strings must be registered in `server/src/services/kafka/domain-events.ts` before use. **Unregistered event types are rejected at code review.**
+### Validation expectations
 
 | Event type | Topic | Version | Owner |
 |---|---|---|---|
