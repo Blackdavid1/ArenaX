@@ -37,11 +37,30 @@ Each deprecated operation records per-operation usage telemetry so removal is dr
 - client class (e.g. `browser`, `server`, `unknown`)
 - usage count
 
-Telemetry never records credentials (authorization headers, tokens, cookies) or sensitive query values; query parameters are reduced to their names before recording.
+## API Boundary Conventions
 
-### Removal threshold and review
+All canonical service responses use explicit boundary representations so clients never have to infer formatting.
 
-An alias may only be removed once it has been deprecated for at least the published sunset window **and** recorded usage has stayed below the agreed threshold (default: zero recorded calls over the trailing 30 days). Removal requires a documented review sign-off from the owning team, and the migration link must remain live for the full sunset window. Until both conditions are met, the alias stays in place and continues to emit the headers above.
+### Money
+
+- Monetary amounts are returned as an **exact decimal string** (e.g. `"1234.50"`) paired with an explicit ISO 4217 `currency` code (e.g. `"USD"`).
+- Amounts are never returned as floats or as bare minor units; clients must not assume a scale.
+
+### Timestamps
+
+- All timestamps are emitted as **unambiguous UTC instants** in RFC 3339 form with a `Z` offset (e.g. `"2024-03-10T07:30:00Z"`).
+- Local times and offset-less values are never returned; daylight-saving transitions therefore cannot change the meaning of a stored instant.
+
+### Locale
+
+- `locale` is an explicit client **preference** (BCP 47, e.g. `"en-US"`), not a server-inferred formatting decision.
+- When a requested locale is unsupported, the service falls back to the documented default locale and reports the resolved locale in the response.
+
+### Validation
+
+- Invalid or unsupported `locale`, `currency`, or `timezone` input is rejected with a **typed validation error** (a stable error code plus the offending field) rather than being silently coerced or formatted server-dependently.
+
+## Handsoff notes
 
 ## Contributing
 
@@ -49,5 +68,11 @@ Keep changes surgical and inside the scope of the assigned issue. Do not install
 
 ## Handsoff notes
 
-<!-- handsoff-issue-166 -->
-- #166: Add cursor pagination for high-volume API collections
+<!-- handsoff-issue-22 -->
+- #22: Reconcile provider balances and unresolved payments
+
+<!-- handsoff-issue-167 -->
+- #167: Propagate request deadlines and cancellation through service calls
+
+<!-- handsoff-issue-169 -->
+- #169: Build retry and dead-letter controls for background jobs
