@@ -2,47 +2,40 @@
 
 ## Getting started
 
-1. Install dependencies with your package manager of choice.
-2. Copy the example environment file and fill in local values.
-3. Run the development server and open the app in a browser.
+Install dependencies and run the local toolchain as described in the project README. Soroban contract tests run against the repository's Soroban test environment (`soroban-sdk` testutils).
 
-## Project layout
+## Cross-contract settlement conformance tests
 
 - `src/` — application source.
 - `src/auth/` — authentication service boundary (password, OTP, and passkey flows).
 - `tests/` — automated coverage.
 - `tests/contract/` — OpenAPI response-conformance contract tests.
 
-## Authentication
+### Shared fixture
 
-### Passkeys (WebAuthn)
+A single fixture (in the settlement integration test module) sets up the token, escrow, match, and tournament contracts once and exposes helpers that replay the canonical settlement sequence:
 
-Passkeys are implemented at the auth service boundary in `src/auth/`. Registration and login
-rely on platform WebAuthn verification and MUST enforce all of the following server-side:
+1. token `approve` / `transfer` for the escrowed amount
+2. escrow `deposit` (or `fund`) for the match
+3. match `settle` / `finalize` referencing the escrow
+4. tournament `record_result` / `payout` consuming the settled match
 
-- **Origin** — the asserted origin must match the configured allowed origin(s).
-- **Challenge** — challenges are generated per ceremony, stored server-side, single-use, and
-  rejected on replay or expiry.
-- **RP-ID** — the relying party ID must match the configured RP-ID and be a registrable suffix
-  of the origin.
-- **User verification** — require `userVerification: "required"` and verify the UV flag in the
-  authenticator data.
+Every conformance test reuses this fixture so the call graph under test matches the one settlement actually performs.
 
-Credential metadata (credential ID, public key, sign counter, transports, AAGUID) is persisted
-per user and per device so multi-device registration is supported. Sign counters are checked to
-detect cloned credentials; a counter regression must fail the assertion and be audited.
+### What the tests assert
 
-### Recovery and credential removal
+- **Authorization** — each cross-contract boundary is called with the expected auth context; unauthorized callers are rejected at the token, escrow, match, and tournament boundaries.
+- **Amount units** — the same amount is expressed consistently (stroops / base units) across token, escrow, match, and tournament calls; no silent scaling between boundaries.
+- **Event emission** — each contract emits its expected event on the settlement path, and the events carry the amounts and identifiers the next contract consumes.
+- **Failure rollback** — a failure injected at any boundary rolls back the whole call graph, leaving no partial state and preserving immutable financial history and explicit transaction finality.
 
-Removing a passkey or recovering an account MUST require a separate verified factor (for
-example a verified email/OTP or password re-authentication). A passkey alone must never
-authorize its own removal or account recovery. Recovery actions are explicit, logged for
-auditability, and never silently weaken existing factors.
+### Failure injection and edge cases
 
-### Fallback
+Focused automated tests inject failures at each cross-contract boundary and cover:
 
-Clients that do not support WebAuthn keep the existing password and OTP flows unchanged.
-Passkey support is additive and must not relax the guarantees of the existing flows.
+- **Retry** — a failed settlement can be retried and succeeds once the injected failure is removed, without double-spending.
+- **Failure** — a mid-sequence failure reverts all prior writes across contracts.
+- **Duplicate delivery** — replaying the same settlement (or the same event) is idempotent and does not create duplicate payouts or records.
 
 ## Soroban resource budgets
 

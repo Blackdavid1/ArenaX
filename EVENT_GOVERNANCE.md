@@ -51,19 +51,22 @@ that records the previous and new values along with the acting operator.
 
 ## Validation expectations
 
-### 3.1 Versioning Strategy
+Replay is **explicit and audited**. It is never triggered automatically by a
+decoder upgrade.
 
-| Change type | Action |
-|---|---|
-| Add optional field | No version bump — backwards-compatible |
-| Rename / remove field | **Bump version** (e.g. `version: 2`) |
-| Change field type | **Bump version** |
-| New event type | New `eventType` string — no version change needed |
+1. Deploy the upgraded decoder.
+2. An operator selects the quarantined records to replay (typically those whose
+   recorded decoder version is older than the current one).
+3. The replay is recorded in the **audit trail**: who triggered it, when, which
+   records, and the decoder version used.
+4. Successfully decoded events are applied; events that still fail remain in
+   quarantine with an updated decoder version.
 
-- Both `version: 1` and `version: 2` schemas must be handled by consumers during the transition window (minimum 2 sprints).
-- Old schema versions are retired only after all consumer groups confirm migration.
+Duplicate delivery is handled idempotently: replaying an event that was already
+applied is a no-op, and retries of a failed replay do not create duplicate
+projection entries.
 
-### 3.2 Event Type Registry
+## Testing expectations
 
 All `eventType` strings must be registered in `server/src/services/kafka/domain-events.ts` before use. **Unregistered event types are rejected at code review.**
 
