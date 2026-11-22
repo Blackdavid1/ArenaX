@@ -1,58 +1,55 @@
-# ArenaX Event Governance Policy
+# Event Governance
 
-> Version: 1.0 · Status: Active · Owner: Backend Platform Team
+This document defines the operator-facing rules for scheduling tournaments and
+other events. It is the canonical reference for how start times, deadlines, and
+timezones are handled.
 
-This document defines the rules, conventions, and processes every engineer must follow when producing or consuming Kafka events on the ArenaX platform.
+## Timezone and DST semantics
 
----
+Tournament scheduling separates the **event instant** from the **organizer's
+display preference**. Both are stored independently.
 
-## 1. Core Principles
+### Creation requirements
 
-- **Events are immutable facts.** Once published, an event record is never edited. Corrections are published as new events.
-- **The event store is the source of truth.** All domain events are persisted to `arenax.event.store` before (or alongside) any database write.
-- **Loose coupling.** Producers must not know about consumers. Never call a consumer API from a producer service.
-- **At-least-once delivery.** Every event may be delivered more than once. All consumers must be idempotent.
+- Every tournament creation request MUST include a valid IANA timezone
+  identifier (e.g. `America/New_York`, `Europe/Berlin`, `UTC`).
+- Invalid or unknown identifiers are rejected at the service boundary; the
+  tournament is not created.
+- The organizer's local start time is interpreted in the supplied timezone.
 
----
+### Ambiguous and nonexistent local times
 
-## 2. Topic Naming Convention
+Daylight-saving transitions make some local times ambiguous (fall-back, the
+clock repeats an hour) or nonexistent (spring-forward, the clock skips an
+hour). The service resolves these with an explicit, user-visible rule:
 
-```
-arenax.<domain>.<event-noun>s        # primary topic
-arenax.<domain>.<event-noun>s.dlq    # dead-letter topic
-arenax.event.store                   # global append-only store
-```
+- **Spring-forward (nonexistent local time):** the requested local time does
+  not exist. It is shifted forward by the size of the gap (typically one hour)
+  to the first valid instant after the transition. The response reports the
+  resolved instant and the applied rule so the organizer can confirm it.
+- **Fall-back (ambiguous local time):** the requested local time occurs twice.
+  The **earlier** (first) occurrence — the pre-transition offset — is chosen.
+  The response reports the resolved instant, the chosen offset, and the applied
+  rule so the organizer can confirm it.
 
-| Domain segment | Examples |
-|---|---|
-| `user` | `arenax.user.events` |
-| `match` | `arenax.match.events` |
-| `achievement` | `arenax.achievement.events` |
-| `wallet` | `arenax.wallet.events` |
+These rules are deterministic and surfaced in the API response; organizers are
+never left with a silently shifted or ambiguous start time.
 
-**Rules:**
-- Lowercase only. Use `.` as separator, never `-` or `_`.
-- Every primary topic MUST have a corresponding `.dlq` topic.
-- Topics are created with `auto.create.topics.enable=true` in dev; use Terraform/scripts in production with explicit partition counts.
+### Execution deadlines vs. display
 
----
+- All execution deadlines and job schedules are persisted and executed as
+  **UTC instants**. Tournament jobs never depend on a local wall-clock time.
+- Displays (API serialization, notifications, operator views) preserve the
+  configured timezone and the resolved UTC offset at the event instant, so the
+  organizer sees the intended local time.
 
-## 3. Event Schema Standards
+### Immutability and corrections
 
-Every event MUST be wrapped in `EventEnvelope<T>`:
+Finalized match and tournament records are immutable. Start times, timezones,
+and deadlines may only be changed through an explicit, audited correction flow
+that records the previous and new values along with the acting operator.
 
-```typescript
-interface EventEnvelope<T> {
-  eventId: string;       // UUID v4 — unique per message
-  eventType: string;     // Dot-separated noun e.g. "match.ended"
-  version: number;       // Integer, starts at 1
-  occurredAt: string;    // ISO-8601 UTC
-  source: string;        // Emitting service name
-  traceId: string;       // Distributed trace correlation id
-  causationId?: string;  // eventId of the event that caused this one
-  payload: T;
-}
-```
+## Validation expectations
 
 ### 3.1 Versioning Strategy
 
